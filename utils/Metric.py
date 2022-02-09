@@ -36,3 +36,6 @@ def compute_meandice(seg_out, seg_label, include_background=False):
     else:
         seg_batch_score /= (num_labels - 1)
     return seg_batch_score
+
+if __name__ == "__main__":
+    pass
