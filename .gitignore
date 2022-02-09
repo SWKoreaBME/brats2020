@@ -1,0 +1,7 @@
+.vscode
+.ipynb_checkpoints
+./*/__pycache__
+
+tmp
+out
+result
