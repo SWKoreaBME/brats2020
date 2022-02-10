@@ -18,8 +18,9 @@ def compute_meandice(seg_out, seg_label, include_background=False):
     """
     num_labels = seg_out.size(1)
     softmax = nn.Softmax(1)
-    seg_out = one_hot(softmax(seg_out).argmax(1).unsqueeze(1), num_classes=num_labels)  # make one-hot
-    seg_label = one_hot(seg_label.argmax(1).unsqueeze(1), num_classes=num_labels)  # make one-hot
+    seg_out = one_hot(softmax(seg_out).argmax(1, keepdim=True), num_classes=num_labels)  # make one-hot
+    seg_label = one_hot(seg_label.argmax(1, keepdim=True), num_classes=num_labels)  # make one-hot
+    
     seg_batch_score = 0
     for label_idx in range(num_labels):
         if (not include_background) and (label_idx == 0):

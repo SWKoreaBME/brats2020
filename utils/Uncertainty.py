@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0, 2"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "0, 2"
 
 from time import time
 from Visualize import plot_with_hist
+from Utils import concat_bg
 
 
 def get_dropout_uncertainty(model, 
@@ -27,7 +28,7 @@ def get_dropout_uncertainty(model,
     
     # Set model to train
     model.train()
-    num_batches, num_labels = x.size(0), x.size(1)
+    num_batches, num_labels = x.size(0), labels.size(1)
     softmax = nn.Softmax(1)
     
     # check model device and input device
@@ -37,7 +38,7 @@ def get_dropout_uncertainty(model,
     assert model_device == input_device, f"Devices should be same, but got {model_device} and {input_device}"
     pass
     
-    total_outs = torch.zeros((num_iters, *x.size()))
+    total_outs = torch.zeros((num_iters, *labels.size()))
     # total_outs = torch.zeros((num_iters, num_batches, num_labels, 240, 240))
     for iter_idx in range(num_iters):
         iter_pred = softmax(model(x))
@@ -121,10 +122,9 @@ if __name__ == "__main__":
     test_dataloader = load_dataloader(root_dir, "test", val_transforms, test_loader_params)
     
     for batch_idx, batch in enumerate(test_dataloader):
-        inputs, labels = batch["image"], batch["label"]
-        labels = labels.argmax(1)  # make one-hot
+        inputs, labels = batch["image"], concat_bg(batch["label"])
         inputs = inputs.to(device)
         
         # Predict Uncertainty
-        get_dropout_uncertainty(model, inputs, labels, num_iters=30, vis=True, img_dir=img_save_dir)
+        get_dropout_uncertainty(model, inputs, labels, num_iters=5, vis=True, img_dir=img_save_dir)
         break

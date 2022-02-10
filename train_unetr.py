@@ -20,7 +20,8 @@ import monai.transforms as tf
 # from monai.losses import DiceLoss, DiceCELoss
 from monai.networks.nets import UNet, UNETR, DynUNet
 from monai.networks.layers import Norm
-from monai.networks import one_hot
+# from monai.networks import one_hot
+from utils.Utils import concat_bg
 from utils.Metric import compute_meandice
 
 from utils.Device import *
@@ -79,6 +80,7 @@ images_seqs = [f"{idx+1}" for idx in range(4)]
 # Model
 amp = True
 device, multi_gpu = gpu_setting()
+
 model = UNETR(in_channels=4,
               out_channels=3+1,
               img_size=240,
@@ -99,7 +101,7 @@ softmax = nn.Softmax(dim=1)
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
 scaler = torch.cuda.amp.GradScaler() if amp else None
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.95, patience=10)
-num_epochs = 500
+num_epochs = 300
 val_freq = 2
 
 train_losses = list()
@@ -127,8 +129,7 @@ for epoch in range(num_epochs):
     model.train()
     for batch_idx, batch in enumerate(train_dataloader):
         optimizer.zero_grad()
-        inputs, labels = batch["image"], batch["label"]
-        labels = one_hot(labels.argmax(1).unsqueeze(1), num_classes=4)  # make one-hot
+        inputs, labels = batch["image"], concat_bg(batch["label"])
         inputs, labels = inputs.to(device), labels.to(device)
 
         if amp and scaler is not None:
@@ -158,8 +159,7 @@ for epoch in range(num_epochs):
     model.eval()
     with torch.no_grad():
         for batch in valid_dataloader:
-            inputs, labels = batch["image"], batch["label"]
-            labels = one_hot(labels.argmax(1).unsqueeze(1), num_classes=4)  # make one-hot
+            inputs, labels = batch["image"], concat_bg(batch["label"])
             inputs, labels = inputs.to(device), labels.to(device)
 
             if amp and scaler is not None:
@@ -200,9 +200,7 @@ for epoch in range(num_epochs):
     print(f"Epoch [{epoch+1}/{num_epochs}]  Train loss: {batch_loss['train']:.4f} Val loss: {batch_loss['val']:.4f} Val Dice: {batch_dice['val']:.4f} (best loss: {best_loss:.4f}) lr: {optimizer.param_groups[0]['lr']:.4f}")
 
     # Visualization
-    outputs = softmax(outputs)
-    
-    output_image = outputs.detach().cpu().numpy()
+    output_image = softmax(outputs).detach().cpu().numpy()
     output_image_tr = output_image.argmax(1)
 
     loaded_image = inputs.detach().cpu().numpy()
@@ -240,8 +238,7 @@ total_num_imgs = 0
 model.eval()
 with torch.no_grad():
     for batch_idx, batch in enumerate(test_dataloader):
-        inputs, labels = batch["image"], batch["label"]
-        labels = one_hot(labels.argmax(1).unsqueeze(1), num_classes=4)  # make one-hot
+        inputs, labels = batch["image"], concat_bg(batch["label"])
         inputs, labels = inputs.to(device), labels.to(device)
 
         if amp and scaler is not None:
@@ -254,9 +251,7 @@ with torch.no_grad():
         total_num_imgs += inputs.size(0)
         
         # Visualization
-        outputs = softmax(outputs)
-        
-        output_image = outputs.detach().cpu().numpy()
+        output_image = softmax(outputs).detach().cpu().numpy()
         output_image_tr = output_image.argmax(1)
 
         loaded_image = inputs.detach().cpu().numpy()
