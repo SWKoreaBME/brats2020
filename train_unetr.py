@@ -8,10 +8,7 @@ import torch.nn as nn
 # import nibabel as nib
 import matplotlib.pyplot as plt
 
-from glob import glob
 from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
-
-from glob import glob
 # from copy import copy
 from shutil import rmtree
 from torch.utils import data
