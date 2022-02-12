@@ -24,12 +24,13 @@ from utils.Device import *
 from utils.Data import load_dataloader
 from utils.Loss import *
 from utils.Utils import count_parameters
+from utils.Model import load_model_weights
 
 
 # train transforms
 train_transforms = tf.Compose([
     tf.LoadImaged(reader="NibabelReader", keys=['image', 'label']),
-    tf.AsDiscreted(keys=['label'], threshold_values=True),
+    # tf.AsDiscreted(keys=['label'], threshold_values=True),
     # tf.ToNumpyd(keys=['image', 'label']),
     # tf.NormalizeIntensityd(keys=['image'], channel_wise=True, nonzero=True),
     tf.ToTensord(keys=['image', 'label']),
@@ -40,7 +41,7 @@ train_transforms = tf.Compose([
 # validation and test transforms
 val_transforms = tf.Compose([
     tf.LoadImaged(reader="NibabelReader", keys=['image', 'label']),
-    tf.AsDiscreted(keys=['label'], threshold_values=True),
+    # tf.AsDiscreted(keys=['label'], threshold_values=True),
     # tf.ToNumpyd(keys=['image', 'label']),
     # tf.NormalizeIntensityd(keys=['image'], channel_wise=True, nonzero=True),
     tf.ToTensord(keys=['image', 'label'])
@@ -81,7 +82,7 @@ model = UNet(
     spatial_dims=2,
     in_channels=4,
     out_channels=3+1,
-    channels=(4, 8, 16, 32, 64),
+    channels=(8, 16, 32, 64, 128),
     strides=(2, 2, 2, 2),
     act="RELU",
     norm='batch',
@@ -89,6 +90,8 @@ model = UNet(
     bias=True
 ).to(device)
 num_params = count_parameters(model)  # count number of parameters
+# model_weights = os.path.join("./result/exps/unet-noaug/checkpoint.pth")
+# model = load_model_weights(model, model_weights, dp=False)
 model = model_dataparallel(model, multi_gpu)
 
 # Loss function
@@ -154,6 +157,8 @@ for epoch in range(num_epochs):
         batch_dice['train'] += compute_meandice(outputs, labels, include_background=False) * inputs.size(0)
         batch_loss['train'] += float(loss.data) * inputs.size(0)
         total_num_imgs['train'] += inputs.size(0)
+        
+        # break
 
         
     # validation
@@ -178,6 +183,8 @@ for epoch in range(num_epochs):
                 pass
             batch_loss['val'] += float(loss.data) * inputs.size(0)
             total_num_imgs['val'] += inputs.size(0)
+            
+            # break
             
     
     batch_loss['train'] = batch_loss['train'] / total_num_imgs['train']
@@ -263,6 +270,8 @@ with torch.no_grad():
 
         loaded_image = inputs.detach().cpu().numpy()
         loaded_label = labels.detach().cpu().numpy().argmax(1)
+        
+        # break
         
     for img_idx in range(inputs.size(0)):
         if img_idx > 16:
