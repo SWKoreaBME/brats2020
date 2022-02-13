@@ -1,5 +1,5 @@
 import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "0, 2"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1, 2, 3"
 
 import torch
 import torch.nn as nn
@@ -24,12 +24,42 @@ from utils.Metric import compute_meandice
 from utils.Device import *
 from utils.Data import load_dataloader
 from utils.Loss import *
+from utils.Gradient import plot_grad_flow
+
+debug = True
+
+# Get Environment variables
+batch_size_train = os.environ["BATCH_SIZE_TRAIN"] if not debug else 64
+batch_size_test = os.environ["BATCH_SIZE_TEST"] if not debug else 64
+root_dir = os.environ["ROOT_DIR"] if not debug else "/cluster/projects/mcintoshgroup/BraTs2020/data_monai/"
+ckpt_save_dir = os.environ["CKPT_SAVE_DIR"] if not debug else "./result/exps/unetr-t1-noaug-debug"
+
+num_epochs = os.environ["NUM_EPOCHS"] if not debug else 1
+
+# Model configuration
+in_channels = os.environ["IN_CHANNELS"] if not debug else 1
+out_channels = os.environ["OUT_CHANNELS"] if not debug else 4
+img_size = os.environ["IMG_SIZE"] if not debug else 240
+feature_size = os.environ["FEATURE_SIZE"] if not debug else 8
+hidden_size = os.environ["HIDDEN_SIZE"] if not debug else 128
+num_heads = os.environ["NUM_HEADS"] if not debug else 4
+dropout_rate = os.environ["DROPOUT_RATE"] if not debug else 0.3
+mlp_dim = os.environ["MLP_DIM"] if not debug else 1024
+norm_name = os.environ["NORM_NAME"] if not debug else "batch"
+spatial_dims = os.environ["SPATIAL_DIMS"] if not debug else 2
+
+lambda_ce = os.environ["LAMBDA_CE"] if not debug else 0.8
+lambda_dice = os.environ["LAMBDA_DICE"] if not debug else 0.2
+lr = os.environ["LR"] if not debug else 0.01
+
+root_dir = "/cluster/projects/mcintoshgroup/BraTs2020/data_monai/"
+ckpt_save_dir = "./result/exps/unetr-t1-noaug"
 
 
 # train transforms
 train_transforms = tf.Compose([
     tf.LoadImaged(reader="NibabelReader", keys=['image', 'label']),
-    tf.AsDiscreted(keys=['label'], threshold_values=True),
+    # tf.AsDiscreted(keys=['label'], threshold_values=True),
     # tf.ToNumpyd(keys=['image', 'label']),
     # tf.NormalizeIntensityd(keys=['image'], channel_wise=True, nonzero=True),
     tf.ToTensord(keys=['image', 'label']),
@@ -40,22 +70,20 @@ train_transforms = tf.Compose([
 # validation and test transforms
 val_transforms = tf.Compose([
     tf.LoadImaged(reader="NibabelReader", keys=['image', 'label']),
-    tf.AsDiscreted(keys=['label'], threshold_values=True),
+    # tf.AsDiscreted(keys=['label'], threshold_values=True),
     # tf.ToNumpyd(keys=['image', 'label']),
     # tf.NormalizeIntensityd(keys=['image'], channel_wise=True, nonzero=True),
     tf.ToTensord(keys=['image', 'label'])
 ])
 
-# root_dir = "/cluster/home/kimsa/data/BraTs2020/BraTS2020_training_data/content/data_monai"
-root_dir = "/cluster/projects/mcintoshgroup/BraTs2020/data_monai/"
 
 loader_params = dict(
-    batch_size=64,
+    batch_size=batch_size_train,
     shuffle=True
 )
 
 test_loader_params = dict(
-    batch_size=64,
+    batch_size=batch_size_test,
     shuffle=False
 )
 
@@ -64,7 +92,6 @@ valid_dataloader = load_dataloader(root_dir, "valid", val_transforms, test_loade
 test_dataloader = load_dataloader(root_dir, "test", val_transforms, test_loader_params)
 
 # Logging
-ckpt_save_dir = "./result/exps/unetr-noaug"
 if os.path.exists(ckpt_save_dir):
     rmtree(ckpt_save_dir)
 os.makedirs(ckpt_save_dir, exist_ok=True)
@@ -72,34 +99,33 @@ os.makedirs(ckpt_save_dir, exist_ok=True)
 img_save_dir = os.path.join(ckpt_save_dir, "figures")
 os.makedirs(img_save_dir, exist_ok=True)
 
-images_seqs = [f"{idx+1}" for idx in range(4)]
+images_seqs = ["T1", "T1Gd", "T2", "FLAIR"]
 
 # Model
 amp = True
 device, multi_gpu = gpu_setting()
 
-model = UNETR(in_channels=4,
-              out_channels=3+1,
-              img_size=240,
-              feature_size=8,
-              dropout_rate=0.3,
-              norm_name='batch',
-              spatial_dims=2).to(device)
+model = UNETR(in_channels=in_channels,
+              out_channels=out_channels,
+              img_size=img_size,
+              feature_size=feature_size,
+              dropout_rate=dropout_rate,
+              hidden_size=hidden_size,
+              num_heads=num_heads,
+              mlp_dim=mlp_dim,
+              norm_name=norm_name,
+              spatial_dims=spatial_dims).to(device)
 model = model_dataparallel(model, multi_gpu)
 
-
-# Loss function
-lambda_ce, lambda_dice = 0.7, 0.3
 
 # Change loss function
 loss_function = seg_loss_fn_3d
 
 softmax = nn.Softmax(dim=1)
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 scaler = torch.cuda.amp.GradScaler() if amp else None
 scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.95, patience=10)
-num_epochs = 300
-val_freq = 2
+num_epochs = num_epochs
 
 train_losses = list()
 val_losses = list()
@@ -126,7 +152,8 @@ for epoch in range(num_epochs):
     model.train()
     for batch_idx, batch in enumerate(train_dataloader):
         optimizer.zero_grad()
-        inputs, labels = batch["image"], concat_bg(batch["label"])
+        # inputs, labels = batch["image"], concat_bg(batch["label"])
+        inputs, labels = batch["image"][:, 0].unsqueeze(1), concat_bg(batch["label"])  # use only T1
         inputs, labels = inputs.to(device), labels.to(device)
 
         if amp and scaler is not None:
@@ -134,6 +161,7 @@ for epoch in range(num_epochs):
                 outputs = model(inputs)
                 loss = loss_function(outputs, labels, lambda_ce, lambda_dice, False, False)
             scaler.scale(loss).backward()
+            plot_grad_flow(model.named_parameters(), f"./asset/gradient-e{epoch+1}-b{batch_idx+1}.jpg")  # plot gradient flow
             scaler.step(optimizer)
             scaler.update()
             if torch.isnan(loss).any():
@@ -150,13 +178,16 @@ for epoch in range(num_epochs):
         batch_dice['train'] += compute_meandice(outputs, labels, include_background=False) * inputs.size(0)
         batch_loss['train'] += float(loss.data) * inputs.size(0)
         total_num_imgs['train'] += inputs.size(0)
+        
+        # break
 
         
     # validation
     model.eval()
     with torch.no_grad():
         for batch in valid_dataloader:
-            inputs, labels = batch["image"], concat_bg(batch["label"])
+            # inputs, labels = batch["image"], concat_bg(batch["label"])
+            inputs, labels = batch["image"][:, 0].unsqueeze(1), concat_bg(batch["label"])  # use only T1
             inputs, labels = inputs.to(device), labels.to(device)
 
             if amp and scaler is not None:
@@ -173,6 +204,7 @@ for epoch in range(num_epochs):
                 pass
             batch_loss['val'] += float(loss.data) * inputs.size(0)
             total_num_imgs['val'] += inputs.size(0)
+            # break
             
     
     batch_loss['train'] = batch_loss['train'] / total_num_imgs['train']
@@ -206,9 +238,12 @@ for epoch in range(num_epochs):
     for img_idx in range(inputs.size(0)):
         if img_idx > 4:
             break
-        fig, axes = plt.subplots(2, inputs.size(1), figsize=(20, 10))
+        fig, axes = plt.subplots(2, 4, figsize=(20, 10))
         plt.suptitle(f"Epoch {epoch+1}", y=0.95)
-        for img_seq_idx in range(inputs.size(1)):
+        for img_seq_idx in range(4):
+            if img_seq_idx >= inputs.size(1):
+                fig.delaxes(axes[0, img_seq_idx])
+                continue
             loaded_seq_image = loaded_image[img_idx][img_seq_idx].squeeze()
             axes[0, img_seq_idx].imshow(loaded_seq_image, cmap='gray',
                                         # vmin=loaded_seq_image.mean() - loaded_seq_image.std() * 1.96,
@@ -235,7 +270,8 @@ total_num_imgs = 0
 model.eval()
 with torch.no_grad():
     for batch_idx, batch in enumerate(test_dataloader):
-        inputs, labels = batch["image"], concat_bg(batch["label"])
+        # inputs, labels = batch["image"], concat_bg(batch["label"])
+        inputs, labels = batch["image"][:, 0].unsqueeze(1), concat_bg(batch["label"])  # use only T1
         inputs, labels = inputs.to(device), labels.to(device)
 
         if amp and scaler is not None:
@@ -254,12 +290,17 @@ with torch.no_grad():
         loaded_image = inputs.detach().cpu().numpy()
         loaded_label = labels.detach().cpu().numpy().argmax(1)
         
+        # break
+        
     for img_idx in range(inputs.size(0)):
-        if img_idx > 16:
+        if img_idx > 8:
             break
-        fig, axes = plt.subplots(2, inputs.size(1), figsize=(20, 10))
+        fig, axes = plt.subplots(2, 4, figsize=(20, 10))
         plt.suptitle(f"Test {batch_idx+1}", y=0.95)
-        for img_seq_idx in range(inputs.size(1)):
+        for img_seq_idx in range(4):
+            if img_seq_idx >= inputs.size(1):
+                fig.delaxes(axes[0, img_seq_idx])
+                continue
             loaded_seq_image = loaded_image[img_idx][img_seq_idx].squeeze()
             axes[0, img_seq_idx].imshow(loaded_seq_image, cmap='gray',
                                         # vmin=loaded_seq_image.mean() - loaded_seq_image.std() * 1.96,
