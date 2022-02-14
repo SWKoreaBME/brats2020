@@ -37,6 +37,28 @@ def plot_with_hist(imgs: list, img_titles: list, img_save_path=None, show: bool 
     plt.close()
     
     
+def plot_whole_imgs(img, img_save_path=None):
+    num_slices = img.shape[0]
+    num_cols = 8
+    num_rows = num_slices // num_cols
+    
+    img = img.astype(np.float)
+    
+    fig, axes = plt.subplots(num_rows, num_cols, figsize=(60, 60))
+    for slice_idx in range(num_slices):
+        img_slice = img[slice_idx]
+        ax = axes[slice_idx//num_cols, slice_idx%num_cols]
+        im = ax.imshow(img_slice, cmap='gray')
+        divider = make_axes_locatable(ax)
+        cax = divider.append_axes('right', size='5%', pad=0.05)
+        fig.colorbar(im, cax=cax, orientation='vertical')
+        
+    if img_save_path is not None:
+        plt.savefig(img_save_path, bbox_inches='tight', dpi=80)
+    plt.show()
+    plt.close()
+    
+    
 if __name__ == "__main__":
     pass
 

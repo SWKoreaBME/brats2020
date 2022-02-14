@@ -1,8 +1,13 @@
 import os
 import numpy as np
+import torch
 from glob import glob
 
 from monai.data import DataLoader, Dataset
+from monai.transforms import MapTransform
+
+from utils.Visualize import plot_whole_imgs
+from utils.Utils import concat_bg, concat_bg_np
 
 
 def load_dataloader(root_dir, phase, transforms, dataloader_params):
@@ -61,6 +66,59 @@ def load_dataloader(root_dir, phase, transforms, dataloader_params):
     dataloader = DataLoader(dataset, **dataloader_params)
 
     return dataloader
+
+
+def convert_label_to_brats(arr):
+    """arr: B X C X H X W
+    """
+    results = torch.zeros_like(arr)
+    for b_idx in range(arr.size(0)):
+        result = []
+        # merge label 4 and label 1 to construct TC
+        arr_b = arr[b_idx].argmax(0)
+        result.append(arr_b == 0)
+        result.append(torch.logical_or(arr_b == 3, arr_b == 1))
+        # merge labels 1, 4 and 2 to construct WT
+        result.append(
+            torch.logical_or(
+                torch.logical_or(arr_b == 3, arr_b == 1), arr_b == 2
+            )
+        )
+        # label 4 is ET
+        result.append(arr_b == 3)
+        results[b_idx] = torch.stack(result, axis=0).float()
+    return results.to(arr.device)
+
+
+class ConvertToMultiChannelBasedOnBratsClassesd(MapTransform):
+    """
+    Convert labels to multi channels based on brats classes:
+    label 2 is the peritumoral edema
+    label 4 is the GD-enhancing tumor
+    label 1 is the necrotic and non-enhancing tumor core
+    The possible classes are
+    TC (Tumor core) --> 0, 2,
+    WT (Whole tumor) --> 0, 1, 2
+    ET (Enhancing tumor) --> 2
+    """
+    def __call__(self, data):
+        d = dict(data)
+        for key in self.keys:
+            result = []
+            # merge label 4 and label 1 to construct TC
+            arr = concat_bg_np(d[key]).argmax(0)
+            # result.append(arr = 0)
+            result.append(np.logical_or(arr == 3, arr == 1))
+            # merge labels 1, 4 and 2 to construct WT
+            result.append(
+                np.logical_or(
+                    np.logical_or(arr == 3, arr == 1), arr == 2
+                )
+            )
+            # label 4 is ET
+            result.append(arr == 3)
+            d[key] = np.stack(result, axis=0).astype(np.float32)
+        return d
 
 
 if __name__ == "__main__":

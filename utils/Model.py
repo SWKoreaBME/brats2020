@@ -12,12 +12,13 @@ def load_model_weights(model, weight_path, dp=True, device="cuda"):
             state_dict = torch.load(weight_path)
             new_state_dict = OrderedDict()
             for k, v in state_dict.items():
-                if 'submodule' in k:
-                    new_state_dict[k] = v
-                    continue
-                else:
-                    name = k.replace('module.', '')  # remove `module.`
-                    new_state_dict[name] = v
+                # if 'submodule' in k and not k.startswith():
+                #     new_state_dict[k] = v
+                #     continue
+                # else:
+                    # name = k.replace('module.', '')  # remove `module.`
+                name = k[7:]
+                new_state_dict[name] = v
             model.load_state_dict(new_state_dict)
 
     elif device=="cpu":

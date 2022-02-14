@@ -38,5 +38,28 @@ def compute_meandice(seg_out, seg_label, include_background=False):
         seg_batch_score /= (num_labels - 1)
     return seg_batch_score
 
+
+def compute_meandice_multilabel(seg_out, seg_label, include_background=False):
+    """ Segmentation score for non-softmax output with multi-labels
+    """
+    num_labels = seg_out.size(1)
+    sigmoid = nn.Sigmoid()
+    seg_out = torch.where(sigmoid(seg_out) > 0.5, 1, 0)
+    
+    seg_batch_score = 0
+    for label_idx in range(num_labels):
+        if (not include_background) and (label_idx == 0):
+            continue
+        _outs, _label = seg_out[:, label_idx], seg_label[:, label_idx]
+        seg_batch_score = seg_batch_score + get_dice_score(_outs.detach().cpu(), _label.detach().cpu()).nanmean()
+        if torch.isnan(seg_batch_score).any():
+            print(seg_batch_score)
+        
+    if include_background:
+        seg_batch_score /= num_labels
+    else:
+        seg_batch_score /= (num_labels - 1)
+    return seg_batch_score
+
 if __name__ == "__main__":
     pass
