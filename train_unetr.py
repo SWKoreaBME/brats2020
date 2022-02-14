@@ -24,7 +24,7 @@ from utils.Utils import concat_bg
 from utils.Metric import compute_meandice, compute_meandice_multilabel
 
 from utils.Device import *
-from utils.Data import load_dataloader, ConvertToMultiChannelBasedOnBratsClassesd, convert_label_to_brats
+from utils.Data import load_dataloader, convert_label_to_brats
 from utils.Loss import *
 from utils.Gradient import plot_grad_flow
 from utils.Visualize import plot_whole_imgs
@@ -36,28 +36,28 @@ device, multi_gpu = gpu_setting()
 
 
 # Get Environment variables
-batch_size_train = os.environ["BATCH_SIZE_TRAIN"] if not debug else 64
-batch_size_test = os.environ["BATCH_SIZE_TEST"] if not debug else 64
+batch_size_train = int(os.environ["BATCH_SIZE_TRAIN"]) if not debug else 64
+batch_size_test = int(os.environ["BATCH_SIZE_TEST"]) if not debug else 64
 root_dir = os.environ["ROOT_DIR"] if not debug else "/cluster/projects/mcintoshgroup/BraTs2020/data_monai/"
 ckpt_save_dir = os.environ["CKPT_SAVE_DIR"] if not debug else "./result/exps/unetr-merge-4layer-noaug-gradient-check"
-num_epochs = os.environ["NUM_EPOCHS"] if not debug else 5
+num_epochs = int(os.environ["NUM_EPOCHS"]) if not debug else 5
 
 # Model configuration
-in_channels = os.environ["IN_CHANNELS"] if not debug else 4
-out_channels = os.environ["OUT_CHANNELS"] if not debug else 4
-img_size = os.environ["IMG_SIZE"] if not debug else 240
-feature_size = os.environ["FEATURE_SIZE"] if not debug else 8
-hidden_size = os.environ["HIDDEN_SIZE"] if not debug else 64
-num_heads = os.environ["NUM_HEADS"] if not debug else 4
-num_layers = os.environ["NUM_LAYERS"] if not debug else 4
-dropout_rate = os.environ["DROPOUT_RATE"] if not debug else 0.3
-mlp_dim = os.environ["MLP_DIM"] if not debug else 256
+in_channels = int(os.environ["IN_CHANNELS"]) if not debug else 4
+out_channels = int(os.environ["OUT_CHANNELS"]) if not debug else 4
+img_size = int(os.environ["IMG_SIZE"]) if not debug else 240
+feature_size = int(os.environ["FEATURE_SIZE"]) if not debug else 8
+hidden_size = int(os.environ["HIDDEN_SIZE"]) if not debug else 64
+num_heads = int(os.environ["NUM_HEADS"]) if not debug else 4
+num_layers = int(os.environ["NUM_LAYERS"]) if not debug else 4
+dropout_rate = float(os.environ["DROPOUT_RATE"]) if not debug else 0.3
+mlp_dim = int(os.environ["MLP_DIM"]) if not debug else 256
 norm_name = os.environ["NORM_NAME"] if not debug else "instance"
-spatial_dims = os.environ["SPATIAL_DIMS"] if not debug else 2
+spatial_dims = int(os.environ["SPATIAL_DIMS"]) if not debug else 2
 
-lambda_ce = os.environ["LAMBDA_CE"] if not debug else 0.5
-lambda_dice = os.environ["LAMBDA_DICE"] if not debug else 0.5
-lr = os.environ["LR"] if not debug else 0.01
+lambda_ce = float(os.environ["LAMBDA_CE"]) if not debug else 0.5
+lambda_dice = float(os.environ["LAMBDA_DICE"]) if not debug else 0.5
+lr = float(os.environ["LR"]) if not debug else 0.01
 
 
 # Tensorboard logging
@@ -187,8 +187,8 @@ for epoch in range(num_epochs):
                 # loss = loss_function(outputs, labels, lambda_ce, lambda_dice, False, False)
                 loss = loss_function(outputs, labels)
             scaler.scale(loss).backward()
-            plot_grad_flow(model.named_parameters(),
-                           os.path.join(grad_save_dir, f"gradient-e{str(epoch+1).zfill(4)}-b{str(batch_idx+1).zfill(4)}.jpg"))  # plot gradient flow
+            # plot_grad_flow(model.named_parameters(),
+            #                os.path.join(grad_save_dir, f"gradient-e{str(epoch+1).zfill(4)}-b{str(batch_idx+1).zfill(4)}.jpg"))  # plot gradient flow
             scaler.step(optimizer)
             scaler.update()
             if torch.isnan(loss).any():
