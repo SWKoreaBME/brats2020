@@ -14,6 +14,8 @@ from mpl_toolkits.axes_grid1.axes_divider import make_axes_locatable
 from shutil import rmtree
 from tqdm import tqdm
 from torch.utils import data
+import numpy as np
+import random
 
 import monai.transforms as tf
 from monai.losses import DiceLoss, DiceCELoss
@@ -28,10 +30,22 @@ from utils.Data import load_dataloader, convert_label_to_brats
 from utils.Loss import *
 from utils.Gradient import plot_grad_flow
 from utils.Visualize import plot_whole_imgs
+from utils.Model import load_model_weights
+from utils.Metric import Score
 
 from datetime import datetime
 
+random_seed = 2022
+torch.manual_seed(random_seed)
+torch.cuda.manual_seed(random_seed)
+torch.cuda.manual_seed_all(random_seed) # if use multi-GPU
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+np.random.seed(random_seed)
+random.seed(random_seed)
+
 debug = False
+test_only = bool(int(os.environ.get("TEST_ONLY"))) if not debug else False
 device, multi_gpu = gpu_setting()
 
 
@@ -39,8 +53,9 @@ device, multi_gpu = gpu_setting()
 batch_size_train = int(os.environ["BATCH_SIZE_TRAIN"]) if not debug else 64
 batch_size_test = int(os.environ["BATCH_SIZE_TEST"]) if not debug else 64
 root_dir = os.environ["ROOT_DIR"] if not debug else "/cluster/projects/mcintoshgroup/BraTs2020/data_monai/"
-ckpt_save_dir = os.environ["CKPT_SAVE_DIR"] if not debug else "./result/exps/unet-merge-noaug-gradient-check"
-num_epochs = int(os.environ["NUM_EPOCHS"]) if not debug else 5
+ckpt_save_dir = os.environ["CKPT_SAVE_DIR"] if not debug else "./result/exps/unet-merge-4layer-withaug-debug"
+num_epochs = int(os.environ["NUM_EPOCHS"]) if not debug else 1
+augmentation = bool(int(os.environ["AUGMENTATION"])) if not debug else True
 
 # Model configuration
 in_channels = int(os.environ["IN_CHANNELS"]) if not debug else 4
@@ -51,7 +66,7 @@ spatial_dims = int(os.environ["SPATIAL_DIMS"]) if not debug else 2
 
 lambda_ce = float(os.environ["LAMBDA_CE"]) if not debug else 0.5
 lambda_dice = float(os.environ["LAMBDA_DICE"]) if not debug else 0.5
-lr = float(os.environ["LR"]) if not debug else 0.01
+lr = float(os.environ["LR"]) if not debug else 0.005
 
 
 # Tensorboard logging
@@ -61,21 +76,32 @@ if not debug:
 
 
 # train transforms
-train_transforms = tf.Compose([
-    tf.LoadImaged(reader="NibabelReader", keys=['image', 'label']),
-    # tf.EnsureChannelFirstd(keys="image"),
-    # ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
-    tf.EnsureTyped(keys=["image", "label"]),
-    tf.ToTensord(keys=['image', 'label']),
-    tf.ToDeviced(keys=["image", "label"], device=device)
-])
-
+# Add augmentation
+if augmentation:
+    train_transforms = tf.Compose([
+        tf.LoadImaged(reader="NibabelReader", keys=['image', 'label']),
+        tf.OneOf([
+            tf.RandGaussianNoised(keys=["image"], prob=0.4, mean=0, std=1.0),  # 0.8 x 0.5
+            tf.RandRotated(keys=["image", "label"], prob=0.4, range_x=(-90, 90)),  # 0.8 x 0.5
+            tf.RandFlipd(keys=["image", "label"], prob=0.4, spatial_axis=0),  # 0.8 x 0.5
+        ]),
+        tf.EnsureTyped(keys=["image", "label"]),
+        tf.ToTensord(keys=['image', 'label']),
+        tf.ToDeviced(keys=["image", "label"], device=device),
+        tf.DeleteItemsd(keys=["image_transforms", "label_transforms"])
+    ])
+    
+else:
+    train_transforms = tf.Compose([
+        tf.LoadImaged(reader="NibabelReader", keys=['image', 'label']),
+        tf.EnsureTyped(keys=["image", "label"]),
+        tf.ToTensord(keys=['image', 'label']),
+        tf.ToDeviced(keys=["image", "label"], device=device),
+    ])
 
 # validation and test transforms
 val_transforms = tf.Compose([
     tf.LoadImaged(reader="NibabelReader", keys=['image', 'label']),
-    # tf.EnsureChannelFirstd(keys="image"),
-    # ConvertToMultiChannelBasedOnBratsClassesd(keys="label"),
     tf.EnsureTyped(keys=["image", "label"]),
     tf.ToTensord(keys=['image', 'label']),
     tf.ToDeviced(keys=["image", "label"], device=device)
@@ -98,8 +124,12 @@ test_dataloader = load_dataloader(root_dir, "test", val_transforms, test_loader_
 
 
 # Logging
-if os.path.exists(ckpt_save_dir):
-    rmtree(ckpt_save_dir)
+# if not test_only:
+#     if os.path.exists(ckpt_save_dir):
+#         rmtree(ckpt_save_dir)
+if debug and (not test_only):
+    if os.path.exists(ckpt_save_dir):
+        rmtree(ckpt_save_dir)
 os.makedirs(ckpt_save_dir, exist_ok=True)
 
 img_save_dir = os.path.join(ckpt_save_dir, "figures")
@@ -113,6 +143,7 @@ images_seqs = ["T1", "T1Gd", "T2", "FLAIR"]
 
 # Model
 amp = True
+
 model = UNet(
     spatial_dims=spatial_dims,
     in_channels=in_channels,
@@ -124,13 +155,17 @@ model = UNet(
     dropout=dropout_rate,
     bias=True
 ).to(device)
+if test_only:
+    model_weights = os.path.join(ckpt_save_dir, "best.pth")
+    assert os.path.exists(model_weights), f"Model weight does not exist"
+    model = load_model_weights(model, model_weights, dp=False)
 # num_params = count_parameters(model)  # count number of parameters
 model = model_dataparallel(model, multi_gpu)
 
 # Loss function
 # Change loss function
 loss_function = DiceCELoss(include_background=False,
-                           smooth_nr=1e-5, 
+                           smooth_nr=1e-5,
                            smooth_dr=1e-5,
                            squared_pred=True,
                            to_onehot_y=False,
@@ -148,154 +183,167 @@ val_freq = 2
 train_losses = list()
 val_losses = list()
 
-best_loss = 1e+2
-print(f"Train Start")
-for epoch in range(num_epochs):
-    
-    current_lr = optimizer.param_groups[0]['lr']
-    
-    batch_loss = dict(
-        train=0,
-        val=0
-    )
-    batch_dice = dict(
-        train=0,
-        val=0
-    )
-    total_num_imgs = dict(
-        train=0,
-        val=0
-    )
-    
-    model.train()
-    for batch_idx, batch in enumerate(train_dataloader):
-        optimizer.zero_grad()
-        # inputs, labels = batch["image"], batch["label"]
-        # labels = one_hot(labels.argmax(1).unsqueeze(1), num_classes=4)  # make one-hot
-        inputs, labels = batch["image"], convert_label_to_brats(concat_bg(batch["label"]))  # use all four mods
-
-        if amp and scaler is not None:
-            with torch.cuda.amp.autocast():
-                outputs = model(inputs)
-                loss = loss_function(outputs, labels)
-            scaler.scale(loss).backward()
-            # plot_grad_flow(model.named_parameters(),
-            #                os.path.join(grad_save_dir, f"gradient-e{str(epoch+1).zfill(4)}-b{str(batch_idx+1).zfill(4)}.jpg"))  # plot gradient flow
-            scaler.step(optimizer)
-            scaler.update()
-            if torch.isnan(loss).any():
-                print(f"NAN in outputs", torch.isnan(outputs).any())
-                print(f"NAN in inputs", torch.isnan(inputs).any())
-                print(f"NAN in labels", torch.isnan(labels).any())
-                break
-        else:
-            outputs = model(inputs)
-            loss = loss_function(outputs, labels)
-            loss.backward()
-            optimizer.step()
+if not test_only:
+    nan_flag = False
+    best_loss = 1e+2
+    print(f"Train Start")
+    for epoch in range(num_epochs):
         
-        batch_dice['train'] += compute_meandice_multilabel(outputs, labels, include_background=False) * inputs.size(0)
-        batch_loss['train'] += float(loss.data) * inputs.size(0)
-        total_num_imgs['train'] += inputs.size(0)
+        current_lr = optimizer.param_groups[0]['lr']
         
-        # break
-        if debug and (batch_idx == 10):
-            break
-
+        batch_loss = dict(
+            train=0,
+            val=0
+        )
+        batch_dice = dict(
+            train=0,
+            val=0
+        )
+        total_num_imgs = dict(
+            train=0,
+            val=0
+        )
         
-    # validation
-    model.eval()
-    with torch.no_grad():
-        for batch in valid_dataloader:
-            # inputs, labels = batch["image"], batch["label"]
-            # labels = one_hot(labels.argmax(1).unsqueeze(1), num_classes=4)  # make one-hot
+        model.train()
+        for batch_idx, batch in enumerate(train_dataloader):
+            optimizer.zero_grad()
             inputs, labels = batch["image"], convert_label_to_brats(concat_bg(batch["label"]))  # use all four mods
+            
+            if debug and (batch_idx==0):
+                for i in range(inputs.size(1)):
+                    plot_whole_imgs(inputs[:, i].detach().cpu().numpy(), os.path.join(img_save_dir, f"inputs-{images_seqs[i]}-augmentation.jpg"))
+                plot_whole_imgs(labels[:, 1:].sum(1).detach().cpu().numpy(), os.path.join(img_save_dir, f"labels-augmentation.jpg"))
 
             if amp and scaler is not None:
                 with torch.cuda.amp.autocast():
                     outputs = model(inputs)
                     loss = loss_function(outputs, labels)
+                scaler.scale(loss).backward()
+                # plot_grad_flow(model.named_parameters(),
+                #                os.path.join(grad_save_dir, f"gradient-e{str(epoch+1).zfill(4)}-b{str(batch_idx+1).zfill(4)}.jpg"))  # plot gradient flow
+                scaler.step(optimizer)
+                scaler.update()
+                if torch.isnan(loss).any():
+                    print(f"NAN in outputs", torch.isnan(outputs).any())
+                    print(f"NAN in inputs", torch.isnan(inputs).any())
+                    print(f"NAN in labels", torch.isnan(labels).any())
+                    nan_flag = True
             else:
                 outputs = model(inputs)
                 loss = loss_function(outputs, labels)
+                loss.backward()
+                optimizer.step()
             
-            batch_dice['val'] += compute_meandice_multilabel(outputs, labels, include_background=False) * inputs.size(0)
-            if torch.isnan(batch_dice['val']).any():
-                print(batch_dice['val'])
-                pass
-            batch_loss['val'] += float(loss.data) * inputs.size(0)
-            total_num_imgs['val'] += inputs.size(0)
+            batch_dice['train'] += compute_meandice_multilabel(outputs, labels, include_background=False) * inputs.size(0)
+            batch_loss['train'] += float(loss.data) * inputs.size(0)
+            total_num_imgs['train'] += inputs.size(0)
             
-            if debug:
+            if nan_flag:
                 break
             
-    batch_loss['train'] = batch_loss['train'] / total_num_imgs['train']
-    batch_dice['train'] = batch_dice['train'] / total_num_imgs['train']
-    
-    batch_loss['val'] = batch_loss['val'] / total_num_imgs['val']
-    batch_dice['val'] = batch_dice['val'] / total_num_imgs['val']
-    
-    train_losses.append(batch_loss['train'])
-    val_losses.append(batch_loss['val'])
-    scheduler.step(batch_loss['val'])
-    
-    if not debug:
+            # break
+            if debug:
+                break
+
+            
+        # validation
+        model.eval()
+        with torch.no_grad():
+            for batch in valid_dataloader:
+                # inputs, labels = batch["image"], batch["label"]
+                # labels = one_hot(labels.argmax(1).unsqueeze(1), num_classes=4)  # make one-hot
+                inputs, labels = batch["image"], convert_label_to_brats(concat_bg(batch["label"]))  # use all four mods
+
+                if amp and scaler is not None:
+                    with torch.cuda.amp.autocast():
+                        outputs = model(inputs)
+                        loss = loss_function(outputs, labels)
+                else:
+                    outputs = model(inputs)
+                    loss = loss_function(outputs, labels)
+                
+                batch_dice['val'] += compute_meandice_multilabel(outputs, labels, include_background=False) * inputs.size(0)
+                if torch.isnan(batch_dice['val']).any():
+                    print(batch_dice['val'])
+                    pass
+                batch_loss['val'] += float(loss.data) * inputs.size(0)
+                total_num_imgs['val'] += inputs.size(0)
+                
+                if debug:
+                    break
+                
+                
+        batch_loss['train'] = batch_loss['train'] / total_num_imgs['train']
+        batch_dice['train'] = batch_dice['train'] / total_num_imgs['train']
+        
+        batch_loss['val'] = batch_loss['val'] / total_num_imgs['val']
+        batch_dice['val'] = batch_dice['val'] / total_num_imgs['val']
+        
+        train_losses.append(batch_loss['train'])
+        val_losses.append(batch_loss['val'])
+        scheduler.step(batch_loss['val'])
+        
         # Tensorboard logging
-        for loss_name, loss_value in batch_loss.items():
-            writer.add_scalar(f'loss/{loss_name}', loss_value, global_step=epoch+1)
-        for score_name, score_value in batch_dice.items():
-            writer.add_scalar(f'dice/{score_name}', score_value, global_step=epoch+1)
+        if not debug:
+            for loss_name, loss_value in batch_loss.items():
+                writer.add_scalar(f'loss/{loss_name}', loss_value, global_step=epoch+1)
+            for score_name, score_value in batch_dice.items():
+                writer.add_scalar(f'dice/{score_name}', score_value, global_step=epoch+1)
+            
         
-    
-    # print if scheduler changes current lr
-    if optimizer.param_groups[0]['lr'] != current_lr:
-        print(f"Learning Rate Changed {current_lr:.4f} --> {optimizer.param_groups[0]['lr']:.4f}")
+        # print if scheduler changes current lr
+        if optimizer.param_groups[0]['lr'] != current_lr:
+            print(f"Learning Rate Changed {current_lr:.4f} --> {optimizer.param_groups[0]['lr']:.4f}")
+            
+            
+        # Model save
+        torch.save(model.state_dict(), os.path.join(ckpt_save_dir, "checkpoint.pth"))
+        if best_loss >= batch_loss['val']:
+            best_loss = batch_loss['val']
+            torch.save(model.state_dict(), os.path.join(ckpt_save_dir, "best.pth"))
+
+        print(f"Epoch [{epoch+1}/{num_epochs}]  Train loss: {batch_loss['train']:.4f} Val loss: {batch_loss['val']:.4f} Val Dice: {batch_dice['val']:.4f} (best loss: {best_loss:.4f}) lr: {optimizer.param_groups[0]['lr']:.4f}")
+
+
+        # Visualization
+        output_image = torch.where(sigmoid(outputs).detach().cpu() > 0.5, 1, 0).numpy()
+        output_image_tr = output_image[:, 1:].sum(1)
+
+        loaded_image = inputs.detach().cpu().numpy()
+        loaded_label = labels.detach().cpu().numpy()[:, 1:].sum(1)
         
+        for img_idx in range(inputs.size(0)):
+            if img_idx > 4:
+                break
+            fig, axes = plt.subplots(2, inputs.size(1), figsize=(20, 10))
+            plt.suptitle(f"Epoch {epoch+1}", y=0.95)
+            for img_seq_idx in range(inputs.size(1)):
+                loaded_seq_image = loaded_image[img_idx][img_seq_idx].squeeze()
+                axes[0, img_seq_idx].imshow(loaded_seq_image, cmap='gray',
+                                            # vmin=loaded_seq_image.mean() - loaded_seq_image.std() * 1.96,
+                                            vmax=loaded_seq_image.mean() + loaded_seq_image.std() * 1.96)
+                axes[0, img_seq_idx].set_title(f"Input ({images_seqs[img_seq_idx]})")
+            axes[1, 0].imshow(loaded_label[img_idx].squeeze(), cmap='gray')
+            axes[1, 0].set_title("Label")
+            axes[1, 1].imshow(output_image_tr[img_idx].squeeze(), cmap='gray')
+            axes[1, 1].set_title("Output")
+            fig.delaxes(axes[1, 2])
+            fig.delaxes(axes[1, 3])
+            plt.savefig(os.path.join(img_save_dir, f"epoch-{epoch+1}_loss_{batch_loss['val']:.4f}.jpg"), bbox_inches='tight', dpi=50)
+            plt.show()
+            plt.close()
         
-    # Model save
-    torch.save(model.state_dict(), os.path.join(ckpt_save_dir, "checkpoint.pth"))
-    if best_loss >= batch_loss['val']:
-        best_loss = batch_loss['val']
-        torch.save(model.state_dict(), os.path.join(ckpt_save_dir, "best.pth"))
-
-    print(f"Epoch [{epoch+1}/{num_epochs}]  Train loss: {batch_loss['train']:.4f} Val loss: {batch_loss['val']:.4f} Val Dice: {batch_dice['val']:.4f} (best loss: {best_loss:.4f}) lr: {optimizer.param_groups[0]['lr']:.4f}")
-
-
-    # Visualization
-    output_image = torch.where(sigmoid(outputs).detach().cpu() > 0.5, 1, 0).numpy()
-    output_image_tr = output_image[:, 1:].sum(1)
-
-    loaded_image = inputs.detach().cpu().numpy()
-    loaded_label = labels.detach().cpu().numpy()[:, 1:].sum(1)
-    
-    for img_idx in range(inputs.size(0)):
-        if img_idx > 4:
+        if debug:
             break
-        fig, axes = plt.subplots(2, inputs.size(1), figsize=(20, 10))
-        plt.suptitle(f"Epoch {epoch+1}", y=0.95)
-        for img_seq_idx in range(inputs.size(1)):
-            loaded_seq_image = loaded_image[img_idx][img_seq_idx].squeeze()
-            axes[0, img_seq_idx].imshow(loaded_seq_image, cmap='gray',
-                                        # vmin=loaded_seq_image.mean() - loaded_seq_image.std() * 1.96,
-                                        vmax=loaded_seq_image.mean() + loaded_seq_image.std() * 1.96)
-            axes[0, img_seq_idx].set_title(f"Input ({images_seqs[img_seq_idx]})")
-        axes[1, 0].imshow(loaded_label[img_idx].squeeze(), cmap='gray')
-        axes[1, 0].set_title("Label")
-        axes[1, 1].imshow(output_image_tr[img_idx].squeeze(), cmap='gray')
-        axes[1, 1].set_title("Output")
-        fig.delaxes(axes[1, 2])
-        fig.delaxes(axes[1, 3])
-        plt.savefig(os.path.join(img_save_dir, f"epoch-{epoch+1}_loss_{batch_loss['val']:.4f}.jpg"), bbox_inches='tight', dpi=50)
-        plt.show()
-        plt.close()
-    
-    if debug:
-        break
 
     
 # Test
-test_dice = 0
-total_num_imgs = 0
+pbar = tqdm(total=len(test_dataloader))
+scorer = Score(
+    include_background=False,
+    sigmoid=True
+)
+
 
 model.eval()
 with torch.no_grad():
@@ -307,22 +355,22 @@ with torch.no_grad():
                 outputs = model(inputs)
         else:
             outputs = model(inputs)
-
-        test_dice += compute_meandice_multilabel(outputs, labels, include_background=False) * inputs.size(0)
-        total_num_imgs += inputs.size(0)
-        
-        # Visualization
-        output_image = torch.where(sigmoid(outputs).detach().cpu() > 0.5, 1, 0).numpy()
-        output_image_tr = output_image[:, 1:].sum(1)
-
-        loaded_image = inputs.detach().cpu().numpy()
-        loaded_label = labels.detach().cpu().numpy()[:, 1:].sum(1)
+            
+        scorer.evaluate(outputs, labels)
+        pbar.update(1)
         
         if debug:
             break
         
+    # Visualization
+    output_image = torch.where(sigmoid(outputs).detach().cpu() > 0.5, 1, 0).numpy()
+    output_image_tr = output_image[:, 1:].sum(1)
+
+    loaded_image = inputs.detach().cpu().numpy()
+    loaded_label = labels.detach().cpu().numpy()[:, 1:].sum(1)
+        
     for img_idx in range(inputs.size(0)):
-        if img_idx > 16:
+        if img_idx > 4:
             break
         fig, axes = plt.subplots(2, inputs.size(1), figsize=(20, 10))
         plt.suptitle(f"Test {batch_idx+1}", y=0.95)
@@ -342,12 +390,9 @@ with torch.no_grad():
         plt.show()
         plt.close()
         
-        if debug:
-            break
+        # if debug:
+        #     break
 
-
-test_dice /= total_num_imgs
-print(f"Test Dice: {test_dice:.4f}")
-
-if debug:
-    rmtree(ckpt_save_dir)
+scorer.save(ckpt_save_dir)
+# if debug:
+#     rmtree(ckpt_save_dir)

@@ -15,10 +15,13 @@ def plot_with_hist(imgs: list, img_titles: list, img_save_path=None, show: bool 
             img = np.zeros_like(img)
         if len(img.shape) == 3:
             img = img[img.shape[0] // 2]  # if the image is 3d, show the center slice
-        cmap = 'Spectral_r' if 'uncertainty' in img_titles[img_idx].lower() else 'gray'
-        
         axes[f'ax_{img_idx + 1}_image'] = fig.add_subplot(2, num_imgs, img_idx + 1)
-        im1 = axes[f'ax_{img_idx + 1}_image'].imshow(img, cmap=cmap)
+        if img_idx >= (num_imgs-3):
+            im1 = axes[f'ax_{img_idx + 1}_image'].imshow(img, cmap='Spectral_r', vmin=0, vmax=1)
+        elif (img_idx < (num_imgs-3)) and (img_idx >= 1):
+            im1 = axes[f'ax_{img_idx + 1}_image'].imshow(img, cmap='gray', vmin=0, vmax=3)
+        else:
+            im1 = axes[f'ax_{img_idx + 1}_image'].imshow(img, cmap='gray')
         divider = make_axes_locatable(axes[f'ax_{img_idx + 1}_image'])
         cax = divider.append_axes('right', size='5%', pad=0.05)
         fig.colorbar(im1, cax=cax, orientation='vertical')
