@@ -1,6 +1,7 @@
 .vscode
 .ipynb_checkpoints
 ./*/__pycache__
+utils/__pycache__/*
 !/.gitignore
 
 *.pyc
@@ -8,3 +9,6 @@
 tmp
 out
 result
+runs
+scripts
+asset/sample.csv

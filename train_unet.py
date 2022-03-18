@@ -345,6 +345,11 @@ scorer = Score(
 )
 
 
+# before test, load best model
+model_weights = os.path.join(ckpt_save_dir, "best.pth")
+model = load_model_weights(model, model_weights, dp=False)
+
+
 model.eval()
 with torch.no_grad():
     for batch_idx, batch in enumerate(test_dataloader):

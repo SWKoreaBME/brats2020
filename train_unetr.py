@@ -19,7 +19,6 @@ import random
 
 import monai.transforms as tf
 from monai.losses import DiceLoss, DiceCELoss
-from monai.networks.nets import UNet, UNETR, DynUNet
 from monai.networks.layers import Norm
 from monai.metrics import get_confusion_matrix
 # from monai.networks import one_hot
@@ -34,6 +33,8 @@ from utils.Visualize import plot_whole_imgs
 from utils.Model import load_model_weights
 from utils.Metric import Score
 
+from model.unetr import UNETR
+
 from datetime import datetime
 
 random_seed = 2022
@@ -46,7 +47,7 @@ np.random.seed(random_seed)
 random.seed(random_seed)
 
 debug = False
-test_only = bool(int(os.environ.get("TEST_ONLY"))) if not debug else False
+test_only = bool(int(os.environ.get("TEST_ONLY"))) if not debug else True
 device, multi_gpu = gpu_setting()
 
 
@@ -54,7 +55,7 @@ device, multi_gpu = gpu_setting()
 batch_size_train = int(os.environ["BATCH_SIZE_TRAIN"]) if not debug else 64
 batch_size_test = int(os.environ["BATCH_SIZE_TEST"]) if not debug else 16
 root_dir = os.environ["ROOT_DIR"] if not debug else "/cluster/projects/mcintoshgroup/BraTs2020/data_monai/"
-ckpt_save_dir = os.environ["CKPT_SAVE_DIR"] if not debug else "./result/exps/unetr-merge-4layer-withaug-debug"
+ckpt_save_dir = os.environ["CKPT_SAVE_DIR"] if not debug else "./result/exps/unetr-merge-4layer-withaug"
 num_epochs = int(os.environ["NUM_EPOCHS"]) if not debug else 1
 augmentation = bool(int(os.environ["AUGMENTATION"])) if not debug else True
 
@@ -139,9 +140,9 @@ test_dataloader = load_dataloader(root_dir, "test", val_transforms, test_loader_
 # if not test_only:
 #     if os.path.exists(ckpt_save_dir):
 #         rmtree(ckpt_save_dir)
-if debug and (not test_only):
-    if os.path.exists(ckpt_save_dir):
-        rmtree(ckpt_save_dir)
+# if debug and (not test_only):
+#     if os.path.exists(ckpt_save_dir):
+#         rmtree(ckpt_save_dir)
 os.makedirs(ckpt_save_dir, exist_ok=True)
 
 img_save_dir = os.path.join(ckpt_save_dir, "figures")
@@ -163,7 +164,6 @@ model = UNETR(in_channels=in_channels,
               hidden_size=hidden_size,
               num_heads=num_heads,
               mlp_dim=mlp_dim,
-              num_layers=num_layers,
               norm_name=norm_name,
               spatial_dims=spatial_dims).to(device)
 if test_only:
@@ -366,6 +366,11 @@ scorer = Score(
     include_background=False,
     sigmoid=True
 )
+
+
+# before test, load best model
+model_weights = os.path.join(ckpt_save_dir, "best.pth")
+model = load_model_weights(model, model_weights, dp=False)
 
 
 model.eval()
