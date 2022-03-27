@@ -54,8 +54,8 @@ device, multi_gpu = gpu_setting()
 # Get Environment variables
 batch_size_train = int(os.environ["BATCH_SIZE_TRAIN"]) if not debug else 64
 batch_size_test = int(os.environ["BATCH_SIZE_TEST"]) if not debug else 16
-root_dir = os.environ["ROOT_DIR"] if not debug else "/cluster/projects/mcintoshgroup/BraTs2020/data_monai/"
-ckpt_save_dir = os.environ["CKPT_SAVE_DIR"] if not debug else "./result/exps/unetr-merge-4layer-withaug"
+root_dir = os.environ["ROOT_DIR"] if not debug else "/path/to/data/dir"
+ckpt_save_dir = os.environ["CKPT_SAVE_DIR"] if not debug else "/path/to/save/dir"
 num_epochs = int(os.environ["NUM_EPOCHS"]) if not debug else 1
 augmentation = bool(int(os.environ["AUGMENTATION"])) if not debug else True
 

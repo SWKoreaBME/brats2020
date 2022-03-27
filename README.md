@@ -16,6 +16,18 @@ This project aims at two goals.
    1. Dropout
 
 
+### Train Examples
+
+```bash
+# To train UNETR
+
+# With Slurm Scripts
+
+>>> sbatch -p gpu /path/to/script
+
+# Directly run python
+>>> python train_unetr.py
+```
 
 ### Contributor
 

@@ -11,8 +11,8 @@ import matplotlib.pyplot as plt
 from glob import glob
 from tqdm import tqdm
 
-root_dir = "/cluster/home/kimsa/data/BraTs2020/BraTS2020_training_data/content/data"
-save_dir = "/cluster/projects/mcintoshgroup/BraTs2020/data_monai"
+root_dir = "/path/to/root/dir"
+save_dir = "/path/to/save/dir"
 os.makedirs(save_dir, exist_ok=True)
 os.makedirs(os.path.join(save_dir, "image"), exist_ok=True)
 os.makedirs(os.path.join(save_dir, "label"), exist_ok=True)
