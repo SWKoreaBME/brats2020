@@ -1,6 +1,8 @@
 from typing import Sequence, Tuple, Union
 
 from monai.networks.nets import UNETR
+from monai.networks.nets.vit import ViT
+from easydict import EasyDict as edict
 
 
 class UNETR(UNETR):
@@ -11,10 +13,25 @@ class UNETR(UNETR):
     Code changed by Sangwook
     """
     
-    def __init__(self, args) -> None:
-        super().__init__(**args)
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
         
         self.num_layers = 4  # for training Brats 2020 model
+        args = edict(kwargs)
+        
+        self.vit = ViT(
+            in_channels=args.in_channels,
+            img_size=args.img_size,
+            patch_size=self.patch_size,
+            hidden_size=args.hidden_size,
+            mlp_dim=args.mlp_dim,
+            num_layers=self.num_layers,
+            num_heads=args.num_heads,
+            pos_embed=args.pos_embed,
+            classification=self.classification,
+            dropout_rate=args.dropout_rate,
+            spatial_dims=args.spatial_dims,
+        )
 
     def forward(self, x_in):
         """Minor changes for different number of layers in UNETR

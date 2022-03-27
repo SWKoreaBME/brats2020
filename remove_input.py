@@ -1,9 +1,12 @@
+from sklearn.feature_extraction import image
 import torch
 import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
 import os
 import random
+import pandas as pd
+from utils.Metric import compute_meandice_multilabel
 
 from utils.Visualize import plot_whole_imgs
 from utils.Utils import concat_bg
@@ -20,10 +23,10 @@ np.random.seed(random_seed)
 random.seed(random_seed)
 
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
-def remove_input(tensor, axis=0):
+def remove_input(tensor, axis=0, mode='zeros'):
     """Remove a single input modality
         
         input tensor: B x C x H x W
@@ -33,7 +36,10 @@ def remove_input(tensor, axis=0):
     single_size = (tensor.size(0), *tensor.size()[2:])
     for i in range(output_tensor.size(1)):
         if i == axis:
-            output_tensor[:, i] = torch.zeros(single_size)
+            if mode == 'zeros':
+                output_tensor[:, i] = torch.zeros(single_size)
+            elif mode == 'random':
+                output_tensor[:, i] = torch.randn(single_size)
         else:
             output_tensor[:, i] = tensor[:, i]
     return output_tensor
@@ -45,7 +51,10 @@ if __name__ == "__main__":
     from utils.Model import load_model_weights
     from utils.Data import load_dataloader
     from utils.Uncertainty import get_dropout_uncertainty
-    from monai.networks.nets import UNETR, UNet
+
+    from model.attnunet import AttU_Net
+    from model.unetr import UNETR
+    from tqdm import tqdm
     
     import monai.transforms as tf
     
@@ -54,36 +63,30 @@ if __name__ == "__main__":
     # Model setting
     amp = True
     device, multi_gpu = gpu_setting()
-    model = UNETR(in_channels=4,
+    unetr = UNETR(in_channels=4,
                   out_channels=4,
                   img_size=240,
                   feature_size=8,
                   dropout_rate=0.3,
                   hidden_size=64,
                   num_heads=4,
-                  num_layers=4,
                   mlp_dim=128,
+                  pos_embed='conv',
                   norm_name='instance',
                   spatial_dims=2).to(device)
-    # model = UNet(
-    #     spatial_dims=2,
-    #     in_channels=4,
-    #     out_channels=3+1,
-    #     channels=(8, 16, 32, 64),
-    #     strides=(2, 2, 2, 2),
-    #     act="RELU",
-    #     norm='instance',
-    #     dropout=0.3,
-    #     bias=True
-    # ).to(device)
-    ckpt_dir = "./result/exps/unetr-merge-4layer-withaug"
-    model_weights = os.path.join(ckpt_dir, "best.pth")
-    model = load_model_weights(model, model_weights, dp=False)
-    model = model_dataparallel(model, multi_gpu)
+    model_weights = os.path.join("./result/exps/unetr-merge-4layer-withaug", "best.pth")
+    unetr = load_model_weights(unetr, model_weights, dp=False)
+    unetr = model_dataparallel(unetr, multi_gpu)
+    
+    attn_unet = AttU_Net(img_ch=4, output_ch=4)
+    model_weights = os.path.join("./asset/WithAug_Attnet.pt")
+    attn_unet = load_model_weights(attn_unet, model_weights, dp=False, device=torch.device('cpu'))
+    attn_unet = attn_unet.to(device)
+    attn_unet = model_dataparallel(attn_unet, multi_gpu)
     
     test_loader_params = dict(
-        batch_size=56,
-        shuffle=True
+        batch_size=128,
+        shuffle=False
     )
     
     # validation and test transforms
@@ -96,9 +99,9 @@ if __name__ == "__main__":
     ])
     
     # Logging directories
-    img_save_dir = os.path.join(ckpt_dir, "input_removed")
-    root_dir = "/cluster/projects/mcintoshgroup/BraTs2020/data_monai/"
+    img_save_dir = os.path.join("./asset", "input_removed")
     os.makedirs(img_save_dir, exist_ok=True)
+    root_dir = "/cluster/projects/mcintoshgroup/BraTs2020/data_monai/"
     
     
     # Test Dataloder
@@ -108,34 +111,61 @@ if __name__ == "__main__":
     # Image seqs
     images_seqs = ["T1", "T1Gd", "T2", "FLAIR"]
     tumors_names = ["TC", "WT", "ET"]
-    
-    
-    # Iterate through mini-batches
-    model.eval()
-    with torch.no_grad():
-        for batch_idx, batch in enumerate(test_dataloader):
-            inputs, labels = batch["image"], convert_label_to_brats(concat_bg(batch["label"]))  # use all four mods
-            labels_np = labels.detach().cpu().numpy()
-            inputs = inputs.to(device)
+    model_dice = list()
+    replace_modes = ["random", "zeros"]
+
+    models = [unetr, attn_unet]
+    for replace_mode in replace_modes:
+        for model_idx, model in enumerate(models):
+        
+            dice_dict = {
+                "original": 0.,
+                "T1": 0.,
+                "T1Gd": 0.,
+                "T2": 0.,
+                "FLAIR": 0.
+            }
+            total_num_imgs = 0
             
-            # remove
-            with torch.cuda.amp.autocast():
-                outputs = torch.where(sigmoid(model(inputs)) > 0.5, 1, 0)
-                
-                plot_whole_imgs(inputs[:, 0].detach().cpu().numpy(), os.path.join(img_save_dir, f"inputs.jpg"))
-                plot_whole_imgs(labels[:, 1:].sum(1).detach().cpu().numpy(), os.path.join(img_save_dir, f"labels.jpg"))
-                plot_whole_imgs(outputs[:, 1:].sum(1).detach().cpu().numpy(), os.path.join(img_save_dir, f"outputs.jpg"))
-                
-                for i in range(4):  # Iterate over image sequences
-                    removed_input = remove_input(inputs, i)
-                    removed_outputs = torch.where(sigmoid(model(removed_input)) > 0.5, 1, 0)
-                    removed_mean, removed_std = get_dropout_uncertainty(model, removed_input, labels, num_iters=10, vis=False)
-                    removed_uncertainty = removed_mean + removed_std
+            model.eval()
+            with torch.no_grad():
+                for batch_idx, batch in tqdm(enumerate(test_dataloader)):
+                    inputs, labels = batch["image"], convert_label_to_brats(concat_bg(batch["label"]))  # use all four mods
+                    labels_np = labels.detach().cpu().numpy()
+                    inputs = inputs.to(device)
+                    total_num_imgs += inputs.size(0)
                     
-                    plot_whole_imgs(removed_outputs[:, 1:].sum(1).detach().cpu().numpy(), os.path.join(img_save_dir, f"{images_seqs[i]}_removed.jpg"))
-                    for k in range(labels.size(1)):
-                        if k == 0:
-                            continue
-                        plot_whole_imgs(removed_uncertainty[:, k],
-                                        os.path.join(img_save_dir, f"{images_seqs[i]}_removed_uncertainty_{tumors_names[k-1]}.jpg"))
-            break
+                    # remove
+                    outputs = torch.where(sigmoid(model(inputs)) > 0.5, 1, 0)
+                    original_dice = compute_meandice_multilabel(outputs, labels, include_background=False) * inputs.size(0)
+                    dice_dict["original"] += float(original_dice.data)
+                    
+                    # plot_whole_imgs(inputs[:, 0].detach().cpu().numpy(), os.path.join(img_save_dir, f"inputs.jpg"))
+                    # plot_whole_imgs(labels[:, 1:].sum(1).detach().cpu().numpy(), os.path.join(img_save_dir, f"labels.jpg"))
+                    # plot_whole_imgs(outputs[:, 1:].sum(1).detach().cpu().numpy(), os.path.join(img_save_dir, f"outputs.jpg"))
+                    
+                    for i in range(4):  # Iterate over image sequences
+                        removed_input = remove_input(inputs, i, mode=replace_mode)
+                        removed_outputs = torch.where(sigmoid(model(removed_input)) > 0.5, 1, 0)
+                        removed_dice = compute_meandice_multilabel(removed_outputs, labels, include_background=False) * inputs.size(0)
+                        dice_dict[images_seqs[i]] += float(removed_dice.data)
+                        # removed_mean, removed_std = get_dropout_uncertainty(model, removed_input, labels, num_iters=300, vis=False)
+                        # removed_uncertainty = removed_mean + removed_std
+                        
+                        # plot_whole_imgs(removed_outputs[:, 1:].sum(1).detach().cpu().numpy(), os.path.join(img_save_dir, f"{images_seqs[i]}_removed.jpg"))
+                        # for k in range(labels.size(1)):
+                        #     if k == 0:
+                        #         continue
+                        #     plot_whole_imgs(removed_uncertainty[:, k],
+                        #                     os.path.join(img_save_dir, f"{images_seqs[i]}_removed_uncertainty_{tumors_names[k-1]}.jpg"))
+                    # break
+                
+            for key, val in dice_dict.items():
+                dice_dict[key] = val / total_num_imgs
+            model_dice.append(list(dice_dict.values()))
+
+    df = pd.DataFrame(data=model_dice)
+    df.index = ["UNETR (random)", "Attn-UNet (random)"] + ["UNETR (zeros)", "Attn-UNet (zeros)"]
+    df.columns = ["Original"] + images_seqs
+    df.to_csv("./asset/input_removed.csv")
+    

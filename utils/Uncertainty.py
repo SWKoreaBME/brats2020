@@ -43,15 +43,14 @@ def get_dropout_uncertainty(model,
     
     total_outs = torch.zeros((num_iters, *labels.size()))
     # total_outs = torch.zeros((num_iters, num_batches, num_labels, 240, 240))
-    with torch.cuda.amp.autocast():
+    with torch.cuda.amp.autocast(), torch.no_grad():
         for iter_idx in range(num_iters):
             iter_pred = sigmoid(model(x))
             total_outs[iter_idx] = iter_pred.unsqueeze(0)
     
         model.eval()
-        with torch.no_grad():
-            static_outs = torch.where(sigmoid(model(x)) > 0.5, 1, 0)[:, 1:].sum(1)
-            static_outs_np = static_outs.detach().cpu().numpy()
+        static_outs = torch.where(sigmoid(model(x)) > 0.5, 1, 0)[:, 1:].sum(1)
+        static_outs_np = static_outs.detach().cpu().numpy()
     
     # Calculate model outputs, calculate average and std over axis 0 (axis of iteration)
     total_outs = total_outs.detach().cpu().numpy()
