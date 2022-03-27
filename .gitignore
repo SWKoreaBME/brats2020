@@ -13,3 +13,4 @@ runs
 scripts
 asset/sample.csv
 *.pt
+asset

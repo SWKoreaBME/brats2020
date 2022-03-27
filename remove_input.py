@@ -1,3 +1,4 @@
+from statistics import mode
 from sklearn.feature_extraction import image
 import torch
 import torch.nn as nn
@@ -85,7 +86,7 @@ if __name__ == "__main__":
     attn_unet = model_dataparallel(attn_unet, multi_gpu)
     
     test_loader_params = dict(
-        batch_size=128,
+        batch_size=8,
         shuffle=False
     )
     
@@ -112,9 +113,11 @@ if __name__ == "__main__":
     images_seqs = ["T1", "T1Gd", "T2", "FLAIR"]
     tumors_names = ["TC", "WT", "ET"]
     model_dice = list()
-    replace_modes = ["random", "zeros"]
+    # replace_modes = ["random", "zeros"]
+    replace_modes = ["zeros"]
 
-    models = [unetr, attn_unet]
+    # models = [unetr, attn_unet]
+    models = [unetr]
     for replace_mode in replace_modes:
         for model_idx, model in enumerate(models):
         
@@ -140,32 +143,58 @@ if __name__ == "__main__":
                     original_dice = compute_meandice_multilabel(outputs, labels, include_background=False) * inputs.size(0)
                     dice_dict["original"] += float(original_dice.data)
                     
-                    # plot_whole_imgs(inputs[:, 0].detach().cpu().numpy(), os.path.join(img_save_dir, f"inputs.jpg"))
-                    # plot_whole_imgs(labels[:, 1:].sum(1).detach().cpu().numpy(), os.path.join(img_save_dir, f"labels.jpg"))
-                    # plot_whole_imgs(outputs[:, 1:].sum(1).detach().cpu().numpy(), os.path.join(img_save_dir, f"outputs.jpg"))
+                    # plot_whole_imgs(inputs[:, 0].detach().cpu().numpy(), 
+                    #                 os.path.join(img_save_dir, f"inputs.jpg"), 
+                    #                 num_cols=int(np.sqrt(inputs.size(0))))
                     
-                    for i in range(4):  # Iterate over image sequences
-                        removed_input = remove_input(inputs, i, mode=replace_mode)
-                        removed_outputs = torch.where(sigmoid(model(removed_input)) > 0.5, 1, 0)
-                        removed_dice = compute_meandice_multilabel(removed_outputs, labels, include_background=False) * inputs.size(0)
-                        dice_dict[images_seqs[i]] += float(removed_dice.data)
-                        # removed_mean, removed_std = get_dropout_uncertainty(model, removed_input, labels, num_iters=300, vis=False)
-                        # removed_uncertainty = removed_mean + removed_std
-                        
-                        # plot_whole_imgs(removed_outputs[:, 1:].sum(1).detach().cpu().numpy(), os.path.join(img_save_dir, f"{images_seqs[i]}_removed.jpg"))
+                    # plot_whole_imgs(outputs[:, 1:].sum(1).detach().cpu().numpy(),
+                    #                 os.path.join(img_save_dir, f"outputs.jpg"),
+                    #                 num_cols=int(np.sqrt(inputs.size(0))))
+                    # plot_whole_imgs(labels[:, 1:].sum(1).detach().cpu().numpy(), os.path.join(img_save_dir, f"labels.jpg"))
+                    
+                    if float(original_dice / inputs.size(0)) > 0.75 and (labels_np[:, 1:].sum(1).sum() > 10000):
+                        for i in range(4):  # Iterate over image sequences
+                            removed_input = remove_input(inputs, i, mode=replace_mode)
+                            removed_outputs = torch.where(sigmoid(model(removed_input)) > 0.5, 1, 0)
+                            # removed_dice = compute_meandice_multilabel(removed_outputs, labels, include_background=False) * inputs.size(0)
+                            # dice_dict[images_seqs[i]] += float(removed_dice.data)
+                            # removed_mean, removed_std = get_dropout_uncertainty(model, removed_input, labels, num_iters=100, vis=False)
+                            # removed_uncertainty = removed_mean + removed_std
+                            
+                            input_np = inputs[:, i].detach().cpu().numpy()
+                            out_np = outputs[:, 1:].sum(1).detach().cpu().numpy()
+                            label_np = labels_np[:, 1:].sum(1)
+                            removed_out_np = removed_outputs[:, 1:].sum(1).detach().cpu().numpy()
+                            
+                            plot_whole_imgs(input_np,
+                                            os.path.join(img_save_dir, f"inputs-{images_seqs[i]}-{replace_mode}-{batch_idx}.jpg"),
+                                            num_cols=2)
+                            
+                            img_to_vis = np.concatenate([label_np, out_np, removed_out_np], -1)
+                            plot_whole_imgs(img_to_vis,
+                                            os.path.join(img_save_dir, f"outputs-{images_seqs[i]}_removed-{replace_mode}-{batch_idx}.jpg"),
+                                            num_cols=2)
+                            
+                        # break
+                            
+                        # Visualize by each tumor
                         # for k in range(labels.size(1)):
                         #     if k == 0:
                         #         continue
-                        #     plot_whole_imgs(removed_uncertainty[:, k],
-                        #                     os.path.join(img_save_dir, f"{images_seqs[i]}_removed_uncertainty_{tumors_names[k-1]}.jpg"))
-                    # break
+                            # removed_uncertainty_np = removed_uncertainty[:, k]
+                            # img_to_vis = np.concatenate([img_to_vis, removed_uncertainty_np], -1)
+                            # plot_whole_imgs(img_to_vis,
+                            #                 os.path.join(img_save_dir, f"{images_seqs[i]}_removed_uncertainty_{tumors_names[k-1]}.jpg"), 
+                            #                 num_cols=int(np.sqrt(inputs.size(0))))
+                if batch_idx == 192:
+                    break
                 
             for key, val in dice_dict.items():
                 dice_dict[key] = val / total_num_imgs
             model_dice.append(list(dice_dict.values()))
 
-    df = pd.DataFrame(data=model_dice)
-    df.index = ["UNETR (random)", "Attn-UNet (random)"] + ["UNETR (zeros)", "Attn-UNet (zeros)"]
-    df.columns = ["Original"] + images_seqs
-    df.to_csv("./asset/input_removed.csv")
+    # df = pd.DataFrame(data=model_dice)
+    # df.index = ["UNETR (random)", "Attn-UNet (random)"] + ["UNETR (zeros)", "Attn-UNet (zeros)"]
+    # df.columns = ["Original"] + images_seqs
+    # df.to_csv("./asset/input_removed.csv")
     
