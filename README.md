@@ -48,11 +48,25 @@ segmentation_models_pytorch
 pathlib
 ```
 ### Dataset
-The dataset can be downloaded from the [link](https://www.kaggle.com/datasets/awsaf49/brats2020-training-data). For running Attention U-Net experiments, one can directly use the downloaded dataset stored in `h5` format. For running UResnet and UNETR, the dataset should be in `nii.gz` format.  
+The dataset can be downloaded from the [link](https://www.kaggle.com/datasets/awsaf49/brats2020-training-data). For running Attention U-Net experiments, one can directly use the downloaded dataset stored in `h5` format. For running UResnet and UNETR, the dataset should be in `nifty` format.  
 
-### Train Examples
 
-#### Training UNETR
+## File Descriptions
+### UNETR
+* `1 - remove_input.py` - This script runs ablation study by removing channels and replacing them with random noise or 0
+* `2 - train_unetr.py` - This script trains transformer unet
+* `3 - transform.py` - This script converts `hdf5` to `nifti` format. Run this script before training the network 
+* `4 - uncertainity` - This script gets the uncertaininty maps for a given model using Monte Carlo Dropout
+* `5 - utils\` - This directory contains helper functions for dataloading, metric calculations, visualizations, uncertaininty calculation, etc.
+### Attention UNet
+* `1 - Hyperparameters\` - This directory is used by `train_attunet_multilabel.py`. It contains `json` files with hyperparameter settings for experiment
+* `2 - evaluate.py` - This script gets the metric scores and uncertainty map for a given model and dataset
+* `3 - remove_input_attn.py` - This script runs ablation study by removing channels and replacing them with random noise or 0
+* `4 - utils\` - This directory contains helper functions for dataloading, metric calculations, visualizations, uncertaininty calculation, etc.
+
+## Train Examples
+
+### Training UNETR
 ```bash
 # To train UNETR
 # With Slurm Scripts
@@ -61,7 +75,7 @@ The dataset can be downloaded from the [link](https://www.kaggle.com/datasets/aw
 # Directly run python
 >>> python ./UNet_transformer/train_unetr.py
 ```
-#### Training Attention Unet
+### Training Attention Unet
 ```bash
 # Directly run python
 >>> python ./Attention_UNET/train_attunet_multilabel.py\
