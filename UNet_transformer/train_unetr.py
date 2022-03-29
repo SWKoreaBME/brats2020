@@ -136,13 +136,6 @@ train_dataloader = load_dataloader(root_dir, "train", train_transforms, loader_p
 valid_dataloader = load_dataloader(root_dir, "valid", val_transforms, test_loader_params)
 test_dataloader = load_dataloader(root_dir, "test", val_transforms, test_loader_params)
 
-# Logging
-# if not test_only:
-#     if os.path.exists(ckpt_save_dir):
-#         rmtree(ckpt_save_dir)
-# if debug and (not test_only):
-#     if os.path.exists(ckpt_save_dir):
-#         rmtree(ckpt_save_dir)
 os.makedirs(ckpt_save_dir, exist_ok=True)
 
 img_save_dir = os.path.join(ckpt_save_dir, "figures")

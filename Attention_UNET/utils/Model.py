@@ -8,6 +8,8 @@ def load_model_weights(model, weight_path, device=torch.device('cuda')):
     state_dict = checkpoint['model_state_dict']
     for key in list(state_dict.keys()):
         state_dict[key.replace('module.', '')] = state_dict.pop(key)
+    assert (len(state_dict.keys())==len(model.state_dict().keys()))
+    print(f"All {len(state_dict.keys())} loaded...")
     model.load_state_dict(state_dict)  
     print(f"Model Loaded from {weight_path}")
     return model

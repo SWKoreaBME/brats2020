@@ -1,0 +1,17 @@
+{
+    "TRAINREPEATS":3000,
+    "TESTREPEATS":200,
+    "LEARNINGRATE":0.0005,
+    "LAMBDA":0.0005,
+    "EPOCHS":150,
+    "FOCAL_IMP": [0.27,0.27,0.27,0.19],
+    "FOCAL_GAMMA":2,
+    "TRAIN_BATCH_SIZE":80,
+    "TEST_BATCH_SIZE":80,
+    "DATASET_PATH":"BraTS2020_training_data",
+    "SAVE_DIR":"/home/ramanav/projects/rrg-amartel/ramanav/Projects/BRATS/backup/Attention_UNET",
+    "DEVICE_LIST":[0,1],
+    "PATIENCE":15,
+    "LAMBDA_CE":0.7,
+    "LAMBDA_DICE":0.3
+}
