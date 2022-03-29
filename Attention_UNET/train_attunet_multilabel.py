@@ -16,7 +16,7 @@ from albumentations.pytorch import ToTensorV2
 import segmentation_models_pytorch as smp
 # from utils.Metric import compute_meandice
 # from utils.Loss import seg_loss_fn_3d
-from utils.lossfunction import DiceScore, MultiFocalLoss
+#from utils.lossfunction import DiceScore, MultiFocalLoss
 from utils.Model import AttU_Net
 from utils.dataloader import BRATS2020_2D
 from utils.parallel import DataParallelModel, DataParallelCriterion, gather

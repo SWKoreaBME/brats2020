@@ -2,8 +2,6 @@
 .ipynb_checkpoints
 ./*/__pycache__
 utils/__pycache__/*
-!/.gitignore
-
 *.pyc
 
 tmp
@@ -14,3 +12,4 @@ scripts
 asset/sample.csv
 *.pt
 asset
+.gitignore
