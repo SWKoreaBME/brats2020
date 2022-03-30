@@ -32,21 +32,20 @@ if __name__ == "__main__":
     # Model setting
     amp = True
     device, multi_gpu = gpu_setting()
-    model = UNETR(in_channels=4,
-                  out_channels=4,
-                  img_size=240,
-                  feature_size=8,
-                  dropout_rate=0.3,
-                  hidden_size=64,
-                  num_heads=4,
-                  mlp_dim=128,
-                  pos_embed='conv',
-                  norm_name='instance',
-                  spatial_dims=2).to(device)
-    ckpt_dir = "./result/exps/unetr-merge-4layer-withaug"
-    model_weights = os.path.join(ckpt_dir, "best.pth")
-    model = load_model_weights(model, model_weights, dp=False)
-    model = model_dataparallel(model, multi_gpu)
+    model = SegResNet(
+        spatial_dims=2,
+        blocks_down=[1, 2, 2, 4],
+        blocks_up=[1, 1, 1],
+        init_filters=16,
+        in_channels=4,
+        out_channels=4,
+        dropout_prob=0.2,
+    ).to(device)
+    model_weights = "./asset/WithAug_UResNet.pth"
+    model.load_state_dict(
+        torch.load(model_weights)
+    )
+    # model = model_dataparallel(model, multi_gpu)
     
     test_loader_params = dict(
         batch_size=1,
@@ -63,8 +62,7 @@ if __name__ == "__main__":
     
     
     # Logging
-    # img_save_dir = os.path.join(ckpt_dir, "uncertainty", "dropout")
-    img_save_dir = os.path.join("asset", "dropout")
+    img_save_dir = os.path.join("./asset/dropout")
     root_dir = "/cluster/projects/mcintoshgroup/BraTs2020/data_monai/"
     os.makedirs(img_save_dir, exist_ok=True)
 
@@ -76,16 +74,16 @@ if __name__ == "__main__":
         file_names = [x["image"] for x in test_dataloader.dataset.data[batch_idx * test_loader_params["batch_size"]: (batch_idx + 1) * test_loader_params["batch_size"]]]
         if os.path.basename(file_names[0]) not in target_files:
             continue
-
+        
         inputs, labels = batch["image"], convert_label_to_brats(concat_bg(batch["label"]))  # use all four mods
         labels_np = labels.detach().cpu().numpy()
         inputs = inputs.to(device)
         
         # Predict Uncertainty
-        get_dropout_uncertainty(model,
-                                inputs,
-                                labels,
-                                num_iters=30,
-                                vis=True,
-                                file_names=file_names,
-                                img_dir=img_save_dir)
+        mean, std = get_dropout_uncertainty(model,
+                                            inputs,
+                                            labels,
+                                            num_iters=100,
+                                            vis=True,
+                                            file_names=file_names,
+                                            img_dir=img_save_dir)
