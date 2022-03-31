@@ -13,7 +13,7 @@ This project aims at two goals
 2. Uncertainty prediction
    - Monte Carlo Dropout
 
-<a href="url"><img src="https://github.com/SWKoreaBME/brats2020/blob/final_version/img/res_img.png" align="center" width="480" ><figcaption>Fig.1 - Experiment Results for three different models with uncertainty quantification</figcaption></a>
+<a href="url"><img src="https://github.com/SWKoreaBME/brats2020/blob/final_version/img/res_img.png" align="center"><figcaption>Fig.1 - Experiment Results for three different models with uncertainty quantification</figcaption></a>
 
 ## Results
 BRATS dataset contains multimodal MRI scans with extensive annotation, comprising GD-enhancing Tumor, peritumoral edema, and necrotic and non-enhancing tumor core. For our experiments, we group labels to make new set of labels as follows:-
