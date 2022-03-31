@@ -6,12 +6,14 @@ This repository implements three different models and analyses the results on th
 This project aims at two goals
 
 1. Brain tumour segmentation
-   - UResNet
+   - ResUNet
    - Attention U-Net
    - UNet Transformer(UNETR)
       
 2. Uncertainty prediction
-   - Dropout
+   - Monte Carlo Dropout
+
+<a href="url"><img src="https://github.com/SWKoreaBME/brats2020/blob/master/img/res_img.png" align="center" width="480" ><figcaption>Fig.1 - Experiment Results for three different models with uncertainty quantification</figcaption></a>
 
 ## Results
 BRATS dataset contains multimodal MRI scans with extensive annotation, comprising GD-enhancing Tumor, peritumoral edema, and necrotic and non-enhancing tumor core. For our experiments, we group labels to make new set of labels as follows:-
@@ -56,13 +58,18 @@ The dataset can be downloaded from the [link](https://www.kaggle.com/datasets/aw
 * `1 - remove_input.py` - This script runs ablation study by removing channels and replacing them with random noise or 0
 * `2 - train_unetr.py` - This script trains transformer unet
 * `3 - transform.py` - This script converts `hdf5` to `nifti` format. Run this script before training the network 
-* `4 - uncertainity` - This script gets the uncertaininty maps for a given model using Monte Carlo Dropout
+* `4 - uncertainity.py` - This script gets the uncertaininty maps for a given model using Monte Carlo Dropout
 * `5 - utils\` - This directory contains helper functions for dataloading, metric calculations, visualizations, uncertaininty calculation, etc.
 ### Attention UNet
 * `1 - Hyperparameters\` - This directory is used by `train_attunet_multilabel.py`. It contains `json` files with hyperparameter settings for experiment
 * `2 - evaluate.py` - This script gets the metric scores and uncertainty map for a given model and dataset
 * `3 - remove_input_attn.py` - This script runs ablation study by removing channels and replacing them with random noise or 0
 * `4 - utils\` - This directory contains helper functions for dataloading, metric calculations, visualizations, uncertaininty calculation, etc.
+
+### ResUNet
+* `1 - train_Resunet.py` - This script trains ResUnet
+* `2 - uncertainity.py` - This script gets the uncertaininty maps for a given model using Monte Carlo Dropout
+* `3 - utils\` - This directory contains helper functions for dataloading, metric calculations, visualizations, uncertaininty calculation, etc.
 
 ## Train Examples
 
@@ -86,6 +93,11 @@ The dataset can be downloaded from the [link](https://www.kaggle.com/datasets/aw
    -r [str: RESUME FROM CHECKPOINT(default: None)]\
    -s [bool: SAVE CHECKPOINTS (True/False)]\
    -w [bool: USE WANDB (True/False)]\
+```
+### Training UResnet
+```bash
+# Directly run python
+>>> python ./UResnet/train_Resunet.py
 ```
 
 ## Contributor
