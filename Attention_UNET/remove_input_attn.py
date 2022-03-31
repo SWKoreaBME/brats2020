@@ -25,9 +25,6 @@ np.random.seed(random_seed)
 random.seed(random_seed)
 
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-
-
 def remove_input(tensor, axis=0, mode='zeros'):
     """Remove a single input modality
         
@@ -61,11 +58,6 @@ if __name__ == "__main__":
     attn_unet = load_model_weights(attn_unet, model_weights, device)
     attn_unet = attn_unet.to(device)
     
-    test_loader_params = dict(
-        batch_size=8,
-        shuffle=False
-    )
-    
     # validation and test transforms
     val_transforms = albumentations.Compose([
         ToTensorV2()])
@@ -80,10 +72,11 @@ if __name__ == "__main__":
     tumors_names = ["TC", "WT", "ET"]
     model_dice = list()
     # replace_modes = ["random", "zeros"]
-    replace_modes = ["zeros"]
+    replace_modes = ["random","zeros"]
 
     models = [attn_unet]
     for replace_mode in replace_modes:
+        print(f"Experiment Mode: {replace_mode}")
         for model_idx, model in enumerate(models):
         
             dice_dict = {
@@ -108,24 +101,24 @@ if __name__ == "__main__":
                     original_dice,_ = compute_meandice_multilabel(outputs, labels, include_background=False)
                     dice_dict["original"] += float(original_dice.data * inputs.size(0))
                                    
-                    if float(original_dice / inputs.size(0)) > 0.75 and (labels_np[:, 1:].sum(1).sum() > 10000):
-                        for i in range(4):  # Iterate over image sequences
-                            removed_input = remove_input(inputs, i, mode=replace_mode)
-                            removed_outputs = torch.where(sigmoid(model(removed_input)) > 0.5, 1, 0)
+                    # if float(original_dice) > 0.55 and (labels_np[:, 1:].sum(1).sum() > 10000):
+                    for i in range(4):  # Iterate over image sequences
+                        removed_input = remove_input(inputs, i, mode=replace_mode)
+                        removed_outputs = torch.where(sigmoid(model(removed_input)) > 0.5, 1, 0)
 
-                            input_np = inputs[:, i].detach().cpu().numpy()
-                            out_np = outputs[:, 1:].sum(1).detach().cpu().numpy()
-                            label_np = labels_np[:, 1:].sum(1)
-                            removed_out_np = removed_outputs[:, 1:].sum(1).detach().cpu().numpy()
-                            
-                            plot_whole_imgs(input_np,
-                                            os.path.join(img_save_dir, f"inputs-{images_seqs[i]}-{replace_mode}-{batch_idx}.jpg"),
-                                            num_cols=2)
-                            
-                            img_to_vis = np.concatenate([label_np, out_np, removed_out_np], -1)
-                            plot_whole_imgs(img_to_vis,
-                                            os.path.join(img_save_dir, f"outputs-{images_seqs[i]}_removed-{replace_mode}-{batch_idx}.jpg"),
-                                            num_cols=2)
+                        input_np = inputs[:, i].detach().cpu().numpy()
+                        out_np = outputs[:, 1:].sum(1).detach().cpu().numpy()
+                        label_np = labels_np[:, 1:].sum(1)
+                        removed_out_np = removed_outputs[:, 1:].sum(1).detach().cpu().numpy()
+                        
+                        # plot_whole_imgs(input_np,
+                        #                 os.path.join(img_save_dir, f"inputs-{images_seqs[i]}-{replace_mode}-{batch_idx}.jpg"),
+                        #                 num_cols=2)
+                        
+                        # img_to_vis = np.concatenate([label_np, out_np, removed_out_np], -1)
+                        # plot_whole_imgs(img_to_vis,
+                        #                 os.path.join(img_save_dir, f"outputs-{images_seqs[i]}_removed-{replace_mode}-{batch_idx}.jpg"),
+                        #                 num_cols=2)
 
                 if batch_idx == 192:
                     break
@@ -133,3 +126,4 @@ if __name__ == "__main__":
             for key, val in dice_dict.items():
                 dice_dict[key] = val / total_num_imgs
             model_dice.append(list(dice_dict.values()))
+            print(model_dice)
